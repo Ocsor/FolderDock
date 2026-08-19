@@ -242,7 +242,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
 
     def open_settings(self) -> None:
         if self._settings_window is not None and self._settings_window.winfo_exists():
-            self._settings_window.focus_force()
+            self._restore_settings_window()
             return
 
         window = ctk.CTkToplevel(self)
@@ -328,6 +328,15 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if self._settings_window is not None:
             self._settings_window.destroy()
             self._settings_window = None
+
+    def _restore_settings_window(self) -> None:
+        window = self._settings_window
+        if window is None or not window.winfo_exists():
+            return
+        window.deiconify()
+        window.lift()
+        window.attributes("-topmost", self.always_on_top.get())
+        window.focus_force()
 
     def _refresh_tab_selector(self) -> None:
         values = self.custom_tabs or ["No custom tabs"]
@@ -887,6 +896,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
     def _toggle_dark_mode(self) -> None:
         ctk.set_appearance_mode("Dark" if self.dark_mode.get() else "Light")
         self._save_settings()
+        # Appearance changes can temporarily withdraw a CTkToplevel on Windows.
+        self.after(20, self._restore_settings_window)
 
     def _toggle_folder_paths(self) -> None:
         self._render_shortcuts()
