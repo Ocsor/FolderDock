@@ -1,26 +1,25 @@
-# Folder Shortcuts
+# FolderDock
 
-Folder Shortcuts is a compact Windows desktop utility for keeping a temporary,
+FolderDock is a compact Windows desktop utility for keeping a temporary,
 ordered list of local and network folders. Open saved folders in File Explorer,
 copy their paths, rename or reorder shortcuts, and remove shortcuts without ever
 changing the folders themselves.
 
 ## Features
 
-- Add folders with the Windows folder picker or paste a UNC path such as
-  `\\SERVER\Jobs\12345`
-- Drag folders from File Explorer onto the window
-- Open with the button or by double-clicking a shortcut row
+- Drag folders from File Explorer onto the Shortcuts or Clients tab
+- Organize saved folders across Shortcuts, Clients, and Archive
+- Open from the compact action menu or by double-clicking a shortcut row
 - Right-click to open, copy the full path, rename, reorder, or remove a shortcut
 - Drag shortcut rows into the preferred order; the order is saved automatically
 - Archive shortcuts to remove them from the main list, then restore them from the
   Archive tab whenever they are needed again
-- Non-blocking availability checks at startup, on open, and on manual refresh
+- Non-blocking availability checks at startup and whenever a folder is opened
 - JSON persistence in `%APPDATA%\FolderShortcuts`
 - Remembers window size, position, and the Always on Top setting
 - Light and dark modes with a remembered Dark Mode toggle
 
-Removing an item removes only its entry from the app. Folder Shortcuts never
+Removing an item removes only its entry from the app. FolderDock never
 deletes or modifies the target folder.
 
 ## Install and run
@@ -48,7 +47,7 @@ pip install customtkinter
 The app creates these files automatically:
 
 - `%APPDATA%\FolderShortcuts\shortcuts.json` — friendly names, paths, order, and
-  archive state
+  Clients membership, and archive state
 - `%APPDATA%\FolderShortcuts\settings.json` — window geometry, appearance, and
   Always on Top
 
@@ -62,7 +61,7 @@ project root:
 
 ```powershell
 pip install pyinstaller
-pyinstaller --noconfirm --clean --noconsole --onefile --name FolderDock --collect-all customtkinter --collect-all tkinterdnd2 --add-data "Logo/FolderDock.png;Logo" main.py
+pyinstaller --noconfirm --clean --noconsole --onefile --name FolderDock --icon "Logo/FolderDock.png" --collect-all customtkinter --collect-all tkinterdnd2 --add-data "Logo/FolderDock.png;Logo" main.py
 ```
 
 The executable is created at `dist\FolderDock.exe`. It uses the same

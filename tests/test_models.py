@@ -19,6 +19,10 @@ class FolderShortcutTests(unittest.TestCase):
         shortcut = FolderShortcut("Archived", r"C:\Old", archived=True)
         self.assertEqual(FolderShortcut.from_dict(shortcut.to_dict()), shortcut)
 
+    def test_client_state_round_trips(self) -> None:
+        shortcut = FolderShortcut("Client", r"C:\Clients\Example", client=True)
+        self.assertEqual(FolderShortcut.from_dict(shortcut.to_dict()), shortcut)
+
 
 if __name__ == "__main__":
     unittest.main()

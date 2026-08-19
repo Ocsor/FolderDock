@@ -12,6 +12,7 @@ class FolderShortcut:
     name: str
     path: str
     archived: bool = False
+    client: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -28,7 +29,10 @@ class FolderShortcut:
         archived = value.get("archived", False)
         if not isinstance(archived, bool):
             archived = False
-        return cls(name=name, path=path, archived=archived) if name and path else None
+        client = value.get("client", False)
+        if not isinstance(client, bool):
+            client = False
+        return cls(name=name, path=path, archived=archived, client=client) if name and path else None
 
 
 def default_shortcut_name(path: str) -> str:

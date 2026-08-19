@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 from typing import Callable
 
 import customtkinter as ctk
@@ -51,6 +51,12 @@ def _short_path(path: str, limit: int = 76) -> str:
         return path
     side = (limit - 3) // 2
     return f"{path[:side]}...{path[-side:]}"
+
+
+def _shortcut_section(shortcut: FolderShortcut) -> str:
+    if shortcut.archived:
+        return "Archive"
+    return "Clients" if shortcut.client else "Shortcuts"
 
 
 def _resource_path(relative_path: str) -> Path:
@@ -101,9 +107,13 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.shortcuts = self.storage.load_shortcuts()
         self.settings = self.storage.load_settings()
         self.statuses: dict[str, bool | None] = {}
-        self._rows: dict[bool, list[ctk.CTkFrame]] = {False: [], True: []}
+        self._rows: dict[str, list[ctk.CTkFrame]] = {
+            "Shortcuts": [],
+            "Clients": [],
+            "Archive": [],
+        }
         self._tooltips: list[Tooltip] = []
-        self._drag_state: dict[str, int | bool] | None = None
+        self._drag_state: dict[str, int | str] | None = None
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="folder-check")
         self._ui_queue: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()
         self._closing = False
@@ -152,36 +162,27 @@ class FolderShortcutsApp(_DndEnabledCTk):
         ctk.CTkLabel(
             title_frame, text="FolderDock", font=ctk.CTkFont(size=22, weight="bold")
         ).grid(row=0, column=title_column, sticky="w")
-        ctk.CTkButton(header, text="Refresh", width=76, command=self.refresh_availability).grid(
-            row=0, column=1, padx=(8, 0)
-        )
-        ctk.CTkButton(header, text="Paste Path", width=92, command=self.paste_path).grid(
-            row=0, column=2, padx=(8, 0)
-        )
-        ctk.CTkButton(header, text="+ Add Folder", width=105, command=self.choose_folder).grid(
-            row=0, column=3, padx=(8, 0)
-        )
-
         self.tabs = ctk.CTkTabview(self, corner_radius=10)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 10))
         self.tabs.add("Shortcuts")
+        self.tabs.add("Clients")
         self.tabs.add("Archive")
-        self.list_frames: dict[bool, ctk.CTkScrollableFrame] = {}
-        for archived, tab_name in ((False, "Shortcuts"), (True, "Archive")):
+        self.list_frames: dict[str, ctk.CTkScrollableFrame] = {}
+        for tab_name in ("Shortcuts", "Clients", "Archive"):
             tab = self.tabs.tab(tab_name)
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
             frame = ctk.CTkScrollableFrame(tab, corner_radius=8)
             frame.grid(row=0, column=0, sticky="nsew")
             frame.grid_columnconfigure(0, weight=1)
-            self.list_frames[archived] = frame
+            self.list_frames[tab_name] = frame
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
         footer.grid_columnconfigure(0, weight=1)
         self.hint_label = ctk.CTkLabel(
             footer,
-            text="Drag rows to reorder, or right-click for more actions",
+            text="Drop folders to add them; drag rows to reorder",
             text_color=("gray40", "gray65"),
             font=ctk.CTkFont(size=11),
         )
@@ -250,24 +251,11 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if not folders:
             messagebox.showwarning("Folder Shortcuts", "Drop one or more folders, not files.", parent=self)
             return
+        add_to_clients = self.tabs.get() == "Clients"
         for path in folders:
-            self._add_shortcut(path, ask_for_name=False)
+            self._add_shortcut(path, client=add_to_clients)
 
-    def choose_folder(self) -> None:
-        path = filedialog.askdirectory(parent=self, title="Choose a folder", mustexist=True)
-        if path:
-            self._add_shortcut(path)
-
-    def paste_path(self) -> None:
-        dialog = ctk.CTkInputDialog(
-            title="Paste folder path",
-            text="Paste a local or UNC folder path:",
-        )
-        path = dialog.get_input()
-        if path and path.strip():
-            self._add_shortcut(path.strip().strip('"'))
-
-    def _add_shortcut(self, path: str, ask_for_name: bool = True) -> None:
+    def _add_shortcut(self, path: str, client: bool = False) -> None:
         cleaned = os.path.normpath(path.strip())
         if not cleaned or cleaned == ".":
             messagebox.showwarning("Folder Shortcuts", "Enter a valid folder path.", parent=self)
@@ -277,15 +265,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             return
 
         fallback = default_shortcut_name(cleaned)
-        name: str | None = ""
-        if ask_for_name:
-            name = ctk.CTkInputDialog(
-                title="Shortcut name",
-                text=f"Friendly name (optional):\n{fallback}",
-            ).get_input()
-            if name is None:  # Cancelling the name dialog cancels the add operation.
-                return
-        self.shortcuts.append(FolderShortcut(name=(name or fallback).strip() or fallback, path=cleaned))
+        self.shortcuts.append(FolderShortcut(name=fallback, path=cleaned, client=client))
         self._save_and_render()
         self._check_availability(len(self.shortcuts) - 1)
 
@@ -293,37 +273,39 @@ class FolderShortcutsApp(_DndEnabledCTk):
         for frame in self.list_frames.values():
             for child in frame.winfo_children():
                 child.destroy()
-        self._rows = {False: [], True: []}
+        self._rows = {"Shortcuts": [], "Clients": [], "Archive": []}
         self._tooltips.clear()
 
-        for archived in (False, True):
-            frame = self.list_frames[archived]
+        for section_name in ("Shortcuts", "Clients", "Archive"):
+            frame = self.list_frames[section_name]
             section = [
                 (index, shortcut)
                 for index, shortcut in enumerate(self.shortcuts)
-                if shortcut.archived is archived
+                if _shortcut_section(shortcut) == section_name
             ]
             if not section:
-                message = (
-                    "No shortcuts yet\nAdd, paste, or drop a folder to get started."
-                    if not archived
-                    else "Nothing archived\nArchived shortcuts remain saved here."
-                )
+                empty_messages = {
+                    "Shortcuts": "No shortcuts yet\nDrop a folder here to get started.",
+                    "Clients": "No clients yet\nDrop a folder here or move one from Shortcuts.",
+                    "Archive": "Nothing archived\nArchived shortcuts remain saved here.",
+                }
                 ctk.CTkLabel(
                     frame,
-                    text=message,
+                    text=empty_messages[section_name],
                     text_color=("gray40", "gray65"),
                     font=ctk.CTkFont(size=14),
                 ).grid(row=0, column=0, pady=70)
                 continue
 
             for view_position, (index, shortcut) in enumerate(section):
-                self._render_shortcut_row(frame, archived, view_position, index, shortcut)
+                self._render_shortcut_row(
+                    frame, section_name, view_position, index, shortcut
+                )
 
     def _render_shortcut_row(
         self,
         frame: ctk.CTkScrollableFrame,
-        archived: bool,
+        section_name: str,
         view_position: int,
         index: int,
         shortcut: FolderShortcut,
@@ -373,8 +355,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
             hover_color=("gray60", "gray40"),
         )
         actions_button.configure(
-            command=lambda button=actions_button, i=index, a=archived: self._show_action_menu(
-                button, i, a
+            command=lambda button=actions_button, i=index, s=section_name: self._show_action_menu(
+                button, i, s
             )
         )
         actions_button.grid(row=0, column=3, rowspan=2, padx=(5, 10))
@@ -383,18 +365,18 @@ class FolderShortcutsApp(_DndEnabledCTk):
             widget.bind("<Double-Button-1>", lambda _event, i=index: self.open_shortcut(i))
             widget.bind(
                 "<Button-3>",
-                lambda event, i=index, p=view_position, a=archived: self._show_context_menu(
-                    event, i, p, a
+                lambda event, i=index, p=view_position, s=section_name: self._show_context_menu(
+                    event, i, p, s
                 ),
             )
             widget.bind(
                 "<ButtonPress-1>",
-                lambda event, p=view_position, a=archived: self._start_row_drag(event, a, p),
+                lambda event, p=view_position, s=section_name: self._start_row_drag(event, s, p),
                 add="+",
             )
             widget.bind("<B1-Motion>", self._drag_row, add="+")
             widget.bind("<ButtonRelease-1>", self._end_row_drag, add="+")
-        self._rows[archived].append(row)
+        self._rows[section_name].append(row)
 
     @staticmethod
     def _status_style(status: bool | None) -> tuple[str, tuple[str, str]]:
@@ -404,9 +386,9 @@ class FolderShortcutsApp(_DndEnabledCTk):
             return "⚠ Unavailable", ("#a13b31", "#f08073")
         return "○ Checking", ("gray45", "gray65")
 
-    def _start_row_drag(self, _event: tk.Event, archived: bool, view_position: int) -> None:
+    def _start_row_drag(self, _event: tk.Event, section: str, view_position: int) -> None:
         self._drag_state = {
-            "archived": archived,
+            "section": section,
             "from_position": view_position,
             "target_position": view_position,
         }
@@ -414,8 +396,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
     def _drag_row(self, event: tk.Event) -> None:
         if self._drag_state is None:
             return
-        archived = bool(self._drag_state["archived"])
-        rows = self._rows[archived]
+        section = str(self._drag_state["section"])
+        rows = self._rows[section]
         if not rows:
             return
 
@@ -437,23 +419,23 @@ class FolderShortcutsApp(_DndEnabledCTk):
             return
         state = self._drag_state
         self._drag_state = None
-        archived = bool(state["archived"])
+        section = str(state["section"])
         start = int(state["from_position"])
         target = int(state["target_position"])
-        for row in self._rows[archived]:
+        for row in self._rows[section]:
             row.configure(border_width=0)
         if start != target:
-            self._reorder_section(archived, start, target)
+            self._reorder_section(section, start, target)
 
-    def _section_indices(self, archived: bool) -> list[int]:
+    def _section_indices(self, section: str) -> list[int]:
         return [
             index
             for index, shortcut in enumerate(self.shortcuts)
-            if shortcut.archived is archived
+            if _shortcut_section(shortcut) == section
         ]
 
-    def _reorder_section(self, archived: bool, start: int, target: int) -> None:
-        slots = self._section_indices(archived)
+    def _reorder_section(self, section: str, start: int, target: int) -> None:
+        slots = self._section_indices(section)
         if not (0 <= start < len(slots) and 0 <= target < len(slots)):
             return
         ordered = [self.shortcuts[index] for index in slots]
@@ -464,18 +446,16 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self._save_and_render()
 
     def _show_context_menu(
-        self, event: tk.Event, index: int, view_position: int, archived: bool
+        self, event: tk.Event, index: int, view_position: int, section: str
     ) -> None:
         menu = tk.Menu(self, tearoff=False)
         menu.add_command(label="Open Folder", command=lambda: self.open_shortcut(index))
         menu.add_command(label="Copy Path", command=lambda: self.copy_path(index))
         menu.add_command(label="Rename Shortcut", command=lambda: self.rename_shortcut(index))
-        menu.add_command(
-            label="Restore Shortcut" if archived else "Archive Shortcut",
-            command=lambda: self.set_archived(index, not archived),
-        )
         menu.add_separator()
-        section_size = len(self._section_indices(archived))
+        self._add_section_actions(menu, index, section)
+        menu.add_separator()
+        section_size = len(self._section_indices(section))
         menu.add_command(
             label="Move Up",
             command=lambda: self.move_shortcut(index, -1),
@@ -494,14 +474,11 @@ class FolderShortcutsApp(_DndEnabledCTk):
             menu.grab_release()
 
     def _show_action_menu(
-        self, button: ctk.CTkButton, index: int, archived: bool
+        self, button: ctk.CTkButton, index: int, section: str
     ) -> None:
         menu = tk.Menu(self, tearoff=False)
         menu.add_command(label="Open Folder", command=lambda: self.open_shortcut(index))
-        menu.add_command(
-            label="Restore Shortcut" if archived else "Archive Shortcut",
-            command=lambda: self.set_archived(index, not archived),
-        )
+        self._add_section_actions(menu, index, section)
         menu.add_separator()
         menu.add_command(label="Remove Shortcut", command=lambda: self.remove_shortcut(index))
         try:
@@ -511,6 +488,22 @@ class FolderShortcutsApp(_DndEnabledCTk):
             )
         finally:
             menu.grab_release()
+
+    def _add_section_actions(self, menu: tk.Menu, index: int, section: str) -> None:
+        if section == "Archive":
+            menu.add_command(
+                label="Restore to Clients" if self.shortcuts[index].client else "Restore to Shortcuts",
+                command=lambda: self.set_archived(index, False),
+            )
+            return
+        menu.add_command(
+            label="Move to Clients" if section == "Shortcuts" else "Move to Shortcuts",
+            command=lambda: self.set_client(index, section == "Shortcuts"),
+        )
+        menu.add_command(
+            label="Archive Shortcut",
+            command=lambda: self.set_archived(index, True),
+        )
 
     def open_shortcut(self, index: int) -> None:
         if not 0 <= index < len(self.shortcuts):
@@ -556,6 +549,13 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.shortcuts[index].archived = archived
         self._save_and_render()
 
+    def set_client(self, index: int, client: bool) -> None:
+        if not 0 <= index < len(self.shortcuts):
+            return
+        self.shortcuts[index].client = client
+        self.shortcuts[index].archived = False
+        self._save_and_render()
+
     def rename_shortcut(self, index: int) -> None:
         if not 0 <= index < len(self.shortcuts):
             return
@@ -578,13 +578,13 @@ class FolderShortcutsApp(_DndEnabledCTk):
     def move_shortcut(self, index: int, offset: int) -> None:
         if not 0 <= index < len(self.shortcuts):
             return
-        archived = self.shortcuts[index].archived
-        slots = self._section_indices(archived)
+        section = _shortcut_section(self.shortcuts[index])
+        slots = self._section_indices(section)
         try:
             position = slots.index(index)
         except ValueError:
             return
-        self._reorder_section(archived, position, position + offset)
+        self._reorder_section(section, position, position + offset)
 
     def refresh_availability(self) -> None:
         for index in range(len(self.shortcuts)):
