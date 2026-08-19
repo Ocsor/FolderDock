@@ -118,6 +118,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self._closing = False
         self._save_after_id: str | None = None
         self._settings_window: ctk.CTkToplevel | None = None
+        self._tab_menu_bindings: set[str] = set()
 
         self.title("FolderDock")
         self.minsize(520, 360)
@@ -172,7 +173,10 @@ class FolderShortcutsApp(_DndEnabledCTk):
             font=ctk.CTkFont(size=20),
             command=self.open_settings,
         ).grid(row=0, column=1, sticky="e")
-        self.tabs = ctk.CTkTabview(self, corner_radius=10)
+        self._last_content_tab = "Shortcuts"
+        self.tabs = ctk.CTkTabview(
+            self, corner_radius=10, command=self._on_tab_selected
+        )
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 10))
         self.list_frames: dict[str, ctk.CTkScrollableFrame] = {}
         for tab_name in self._section_names():
@@ -184,6 +188,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
             frame.grid(row=0, column=0, sticky="nsew")
             frame.grid_columnconfigure(0, weight=1)
             self.list_frames[tab_name] = frame
+        self.tabs.add("+")
+        self._bind_custom_tab_menus()
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
@@ -233,7 +239,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
 
     @staticmethod
     def _valid_new_tab_name(name: str, existing: list[str]) -> bool:
-        reserved = {"shortcuts", "archive"}
+        reserved = {"shortcuts", "archive", "+"}
         used = {value.casefold() for value in existing}
         return bool(name) and name.casefold() not in reserved | used
 
@@ -249,7 +255,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         window = ctk.CTkToplevel(self)
         self._settings_window = window
         window.title("FolderDock Settings")
-        window.geometry("380x430")
+        window.geometry("340x250")
         window.resizable(False, False)
         window.transient(self)
         window.attributes("-topmost", self.always_on_top.get())
@@ -286,43 +292,6 @@ class FolderShortcutsApp(_DndEnabledCTk):
             command=self._toggle_folder_paths,
         ).grid(row=2, column=0, sticky="w", padx=18, pady=(10, 18))
 
-        tabs_frame = ctk.CTkFrame(window, corner_radius=10)
-        tabs_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(16, 0))
-        tabs_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            tabs_frame,
-            text="Custom tabs",
-            anchor="w",
-            font=ctk.CTkFont(size=15, weight="bold"),
-        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=18, pady=(16, 10))
-
-        self.selected_tab = tk.StringVar()
-        self.tab_selector = ctk.CTkOptionMenu(
-            tabs_frame,
-            variable=self.selected_tab,
-            dynamic_resizing=False,
-        )
-        self.tab_selector.grid(
-            row=1, column=0, columnspan=3, sticky="ew", padx=18, pady=(0, 12)
-        )
-        ctk.CTkButton(
-            tabs_frame, text="Add", width=92, command=self.add_custom_tab
-        ).grid(row=2, column=0, padx=(18, 4), pady=(0, 16))
-        self.rename_tab_button = ctk.CTkButton(
-            tabs_frame, text="Rename", width=92, command=self.rename_custom_tab
-        )
-        self.rename_tab_button.grid(row=2, column=1, padx=4, pady=(0, 16))
-        self.remove_tab_button = ctk.CTkButton(
-            tabs_frame,
-            text="Remove",
-            width=92,
-            fg_color=("gray70", "gray30"),
-            hover_color=("gray60", "gray40"),
-            command=self.remove_custom_tab,
-        )
-        self.remove_tab_button.grid(row=2, column=2, padx=(4, 18), pady=(0, 16))
-        self._refresh_tab_selector()
-
         self._center_settings_window()
         window.after(50, window.focus_force)
 
@@ -346,22 +315,50 @@ class FolderShortcutsApp(_DndEnabledCTk):
             return
         self.update_idletasks()
         window.update_idletasks()
-        width, height = 380, 430
+        width, height = 340, 250
         # winfo_x/y use the outer window position, avoiding title-bar offsets.
         x = self.winfo_x() + (self.winfo_width() - width) // 2
         y = self.winfo_y() + (self.winfo_height() - height) // 2
         window.geometry(f"{width}x{height}+{x}+{y}")
 
-    def _refresh_tab_selector(self) -> None:
-        values = self.custom_tabs or ["No custom tabs"]
-        self.tab_selector.configure(
-            values=values,
-            state="normal" if self.custom_tabs else "disabled",
-        )
-        self.selected_tab.set(self.custom_tabs[0] if self.custom_tabs else values[0])
-        state = "normal" if self.custom_tabs else "disabled"
-        self.rename_tab_button.configure(state=state)
-        self.remove_tab_button.configure(state=state)
+    def _on_tab_selected(self) -> None:
+        selected = self.tabs.get()
+        if selected == "+":
+            previous = (
+                self._last_content_tab
+                if self._last_content_tab in self._section_names()
+                else "Shortcuts"
+            )
+            self.tabs.set(previous)
+            self.after(0, self.add_custom_tab)
+        elif selected in self._section_names():
+            self._last_content_tab = selected
+
+    def _bind_custom_tab_menus(self) -> None:
+        segmented = getattr(self.tabs, "_segmented_button", None)
+        buttons = getattr(segmented, "_buttons_dict", {})
+        for name in self.custom_tabs:
+            if name in self._tab_menu_bindings:
+                continue
+            button = buttons.get(name)
+            if button is not None:
+                button.bind(
+                    "<Button-3>",
+                    lambda event, tab_name=name: self._show_tab_menu(event, tab_name),
+                    add="+",
+                )
+                self._tab_menu_bindings.add(name)
+
+    def _show_tab_menu(self, event: tk.Event, name: str) -> None:
+        if name not in self.custom_tabs:
+            return
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Rename Tab", command=lambda: self.rename_custom_tab(name))
+        menu.add_command(label="Delete Tab", command=lambda: self.remove_custom_tab(name))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def add_custom_tab(self) -> None:
         name = ctk.CTkInputDialog(
@@ -373,7 +370,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if len(name) > 24 or not self._valid_new_tab_name(name, self.custom_tabs):
             messagebox.showwarning(
                 "Invalid tab name",
-                "Use a unique name of 1–24 characters. Shortcuts and Archive are reserved.",
+                "Use a unique name of 1–24 characters. Shortcuts, Archive, and + are reserved.",
                 parent=self._settings_window,
             )
             return
@@ -389,13 +386,12 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.list_frames[name] = frame
         self._rows[name] = []
         self.tabs.set(name)
+        self._last_content_tab = name
+        self._bind_custom_tab_menus()
         self._render_shortcuts()
         self._save_settings()
-        self._refresh_tab_selector()
-        self.selected_tab.set(name)
 
-    def rename_custom_tab(self) -> None:
-        old_name = self.selected_tab.get()
+    def rename_custom_tab(self, old_name: str) -> None:
         if old_name not in self.custom_tabs:
             return
         name = ctk.CTkInputDialog(
@@ -408,13 +404,14 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if len(name) > 24 or not self._valid_new_tab_name(name, other_tabs):
             messagebox.showwarning(
                 "Invalid tab name",
-                "Use a unique name of 1–24 characters. Shortcuts and Archive are reserved.",
-                parent=self._settings_window,
+                "Use a unique name of 1–24 characters. Shortcuts, Archive, and + are reserved.",
+                parent=self,
             )
             return
 
         position = self.custom_tabs.index(old_name)
         self.custom_tabs[position] = name
+        self._tab_menu_bindings.discard(old_name)
         for shortcut in self.shortcuts:
             if shortcut.tab == old_name:
                 shortcut.tab = name
@@ -422,13 +419,12 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.list_frames[name] = self.list_frames.pop(old_name)
         self._rows[name] = self._rows.pop(old_name)
         self.tabs.set(name)
+        self._last_content_tab = name
+        self._bind_custom_tab_menus()
         self._save_and_render()
         self._save_settings()
-        self._refresh_tab_selector()
-        self.selected_tab.set(name)
 
-    def remove_custom_tab(self) -> None:
-        name = self.selected_tab.get()
+    def remove_custom_tab(self, name: str) -> None:
         if name not in self.custom_tabs:
             return
         affected = sum(shortcut.tab == name for shortcut in self.shortcuts)
@@ -440,20 +436,21 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if not messagebox.askyesno(
             "Remove tab",
             f'Remove the tab "{name}"?{detail}\n\nNo folders will be deleted.',
-            parent=self._settings_window,
+            parent=self,
         ):
             return
         for shortcut in self.shortcuts:
             if shortcut.tab == name:
                 shortcut.tab = ""
         self.tabs.set("Shortcuts")
+        self._last_content_tab = "Shortcuts"
         self.tabs.delete(name)
         self.custom_tabs.remove(name)
+        self._tab_menu_bindings.discard(name)
         self.list_frames.pop(name, None)
         self._rows.pop(name, None)
         self._save_and_render()
         self._save_settings()
-        self._refresh_tab_selector()
 
     def _enable_drag_and_drop(self) -> None:
         if TkinterDnD is None or DND_FILES is None:
