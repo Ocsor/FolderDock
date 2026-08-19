@@ -118,6 +118,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self._ui_queue: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()
         self._closing = False
         self._save_after_id: str | None = None
+        self._settings_window: ctk.CTkToplevel | None = None
 
         self.title("FolderDock")
         self.minsize(520, 360)
@@ -130,6 +131,9 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.always_on_top = tk.BooleanVar(value=bool(self.settings.get("always_on_top", False)))
         saved_appearance = self.settings.get("appearance_mode", ctk.get_appearance_mode())
         self.dark_mode = tk.BooleanVar(value=saved_appearance == "Dark")
+        self.show_folder_paths = tk.BooleanVar(
+            value=bool(self.settings.get("show_folder_paths", False))
+        )
         ctk.set_appearance_mode("Dark" if self.dark_mode.get() else "Light")
         self.attributes("-topmost", self.always_on_top.get())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -162,6 +166,13 @@ class FolderShortcutsApp(_DndEnabledCTk):
         ctk.CTkLabel(
             title_frame, text="FolderDock", font=ctk.CTkFont(size=22, weight="bold")
         ).grid(row=0, column=title_column, sticky="w")
+        ctk.CTkButton(
+            header,
+            text="☰",
+            width=42,
+            font=ctk.CTkFont(size=20),
+            command=self.open_settings,
+        ).grid(row=0, column=1, sticky="e")
         self.tabs = ctk.CTkTabview(self, corner_radius=10)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 10))
         self.tabs.add("Shortcuts")
@@ -187,18 +198,6 @@ class FolderShortcutsApp(_DndEnabledCTk):
             font=ctk.CTkFont(size=11),
         )
         self.hint_label.grid(row=0, column=0, sticky="w")
-        ctk.CTkSwitch(
-            footer,
-            text="Dark mode",
-            variable=self.dark_mode,
-            command=self._toggle_dark_mode,
-        ).grid(row=0, column=1, sticky="e", padx=(8, 14))
-        ctk.CTkSwitch(
-            footer,
-            text="Always on top",
-            variable=self.always_on_top,
-            command=self._toggle_topmost,
-        ).grid(row=0, column=2, sticky="e")
 
     def _load_logo(self) -> ctk.CTkImage | None:
         logo_path = _resource_path("Logo/FolderDock.png")
@@ -220,6 +219,58 @@ class FolderShortcutsApp(_DndEnabledCTk):
             self.iconphoto(True, self._window_icon)
         except tk.TclError:
             self._window_icon = None
+
+    def open_settings(self) -> None:
+        if self._settings_window is not None and self._settings_window.winfo_exists():
+            self._settings_window.focus_force()
+            return
+
+        window = ctk.CTkToplevel(self)
+        self._settings_window = window
+        window.title("FolderDock Settings")
+        window.geometry("340x250")
+        window.resizable(False, False)
+        window.transient(self)
+        window.attributes("-topmost", self.always_on_top.get())
+        window.protocol("WM_DELETE_WINDOW", self._close_settings)
+        window.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            window,
+            text="Settings",
+            anchor="w",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).grid(row=0, column=0, sticky="ew", padx=22, pady=(20, 14))
+
+        controls = ctk.CTkFrame(window, corner_radius=10)
+        controls.grid(row=1, column=0, sticky="ew", padx=20)
+        controls.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkSwitch(
+            controls,
+            text="Dark mode",
+            variable=self.dark_mode,
+            command=self._toggle_dark_mode,
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
+        ctk.CTkSwitch(
+            controls,
+            text="Always on top",
+            variable=self.always_on_top,
+            command=self._toggle_topmost,
+        ).grid(row=1, column=0, sticky="w", padx=18, pady=10)
+        ctk.CTkSwitch(
+            controls,
+            text="Show folder paths",
+            variable=self.show_folder_paths,
+            command=self._toggle_folder_paths,
+        ).grid(row=2, column=0, sticky="w", padx=18, pady=(10, 18))
+
+        window.after(50, window.focus_force)
+
+    def _close_settings(self) -> None:
+        if self._settings_window is not None:
+            self._settings_window.destroy()
+            self._settings_window = None
 
     def _enable_drag_and_drop(self) -> None:
         if TkinterDnD is None or DND_FILES is None:
@@ -313,6 +364,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
         row = ctk.CTkFrame(frame, corner_radius=8, border_width=0)
         row.grid(row=view_position, column=0, sticky="ew", padx=2, pady=(2, 7))
         row.grid_columnconfigure(1, weight=1)
+        show_path = self.show_folder_paths.get()
+        row_span = 2 if show_path else 1
 
         handle = ctk.CTkLabel(
             row,
@@ -322,7 +375,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             text_color=("gray45", "gray60"),
             font=ctk.CTkFont(size=18),
         )
-        handle.grid(row=0, column=0, rowspan=2, padx=(8, 0))
+        handle.grid(row=0, column=0, rowspan=row_span, padx=(8, 0))
 
         name = ctk.CTkLabel(
             row,
@@ -330,22 +383,30 @@ class FolderShortcutsApp(_DndEnabledCTk):
             anchor="w",
             font=ctk.CTkFont(size=15, weight="bold"),
         )
-        name.grid(row=0, column=1, sticky="ew", padx=(8, 6), pady=(10, 0))
-
-        path_label = ctk.CTkLabel(
-            row,
-            text=_short_path(shortcut.path),
-            anchor="w",
-            text_color=("gray35", "gray70"),
-            font=ctk.CTkFont(size=11),
+        name.grid(
+            row=0,
+            column=1,
+            sticky="ew",
+            padx=(8, 6),
+            pady=(11, 11) if not show_path else (10, 0),
         )
-        path_label.grid(row=1, column=1, sticky="ew", padx=(8, 6), pady=(1, 10))
-        self._tooltips.append(Tooltip(path_label, shortcut.path))
+
+        path_label: ctk.CTkLabel | None = None
+        if show_path:
+            path_label = ctk.CTkLabel(
+                row,
+                text=_short_path(shortcut.path),
+                anchor="w",
+                text_color=("gray35", "gray70"),
+                font=ctk.CTkFont(size=11),
+            )
+            path_label.grid(row=1, column=1, sticky="ew", padx=(8, 6), pady=(1, 10))
+            self._tooltips.append(Tooltip(path_label, shortcut.path))
 
         status = self.statuses.get(_path_key(shortcut.path))
         status_text, status_color = self._status_style(status)
         status_label = ctk.CTkLabel(row, text=status_text, text_color=status_color, width=88)
-        status_label.grid(row=0, column=2, rowspan=2, padx=3)
+        status_label.grid(row=0, column=2, rowspan=row_span, padx=3)
 
         actions_button = ctk.CTkButton(
             row,
@@ -359,9 +420,12 @@ class FolderShortcutsApp(_DndEnabledCTk):
                 button, i, s
             )
         )
-        actions_button.grid(row=0, column=3, rowspan=2, padx=(5, 10))
+        actions_button.grid(row=0, column=3, rowspan=row_span, padx=(5, 10))
 
-        for widget in (row, handle, name, path_label, status_label):
+        draggable_widgets: list[tk.Misc] = [row, handle, name, status_label]
+        if path_label is not None:
+            draggable_widgets.append(path_label)
+        for widget in draggable_widgets:
             widget.bind("<Double-Button-1>", lambda _event, i=index: self.open_shortcut(i))
             widget.bind(
                 "<Button-3>",
@@ -636,11 +700,18 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self._render_shortcuts()
 
     def _toggle_topmost(self) -> None:
-        self.attributes("-topmost", self.always_on_top.get())
+        enabled = self.always_on_top.get()
+        self.attributes("-topmost", enabled)
+        if self._settings_window is not None and self._settings_window.winfo_exists():
+            self._settings_window.attributes("-topmost", enabled)
         self._save_settings()
 
     def _toggle_dark_mode(self) -> None:
         ctk.set_appearance_mode("Dark" if self.dark_mode.get() else "Light")
+        self._save_settings()
+
+    def _toggle_folder_paths(self) -> None:
+        self._render_shortcuts()
         self._save_settings()
 
     def _schedule_settings_save(self, event: tk.Event) -> None:
@@ -656,6 +727,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             self.settings["geometry"] = self.geometry()
         self.settings["always_on_top"] = self.always_on_top.get()
         self.settings["appearance_mode"] = "Dark" if self.dark_mode.get() else "Light"
+        self.settings["show_folder_paths"] = self.show_folder_paths.get()
         try:
             self.storage.save_settings(self.settings)
         except OSError:

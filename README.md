@@ -11,13 +11,14 @@ changing the folders themselves.
 - Organize saved folders across Shortcuts, Clients, and Archive
 - Open from the compact action menu or by double-clicking a shortcut row
 - Right-click to open, copy the full path, rename, reorder, or remove a shortcut
+- Compact rows with optional folder paths controlled from the Settings menu
 - Drag shortcut rows into the preferred order; the order is saved automatically
 - Archive shortcuts to remove them from the main list, then restore them from the
   Archive tab whenever they are needed again
 - Non-blocking availability checks at startup and whenever a folder is opened
 - JSON persistence in `%APPDATA%\FolderShortcuts`
-- Remembers window size, position, and the Always on Top setting
-- Light and dark modes with a remembered Dark Mode toggle
+- Top-right Settings menu for folder-path visibility, Dark Mode, and Always on Top
+- Remembers window size, position, appearance, and display preferences
 
 Removing an item removes only its entry from the app. FolderDock never
 deletes or modifies the target folder.
@@ -48,8 +49,8 @@ The app creates these files automatically:
 
 - `%APPDATA%\FolderShortcuts\shortcuts.json` — friendly names, paths, order, and
   Clients membership, and archive state
-- `%APPDATA%\FolderShortcuts\settings.json` — window geometry, appearance, and
-  Always on Top
+- `%APPDATA%\FolderShortcuts\settings.json` — window geometry, appearance,
+  folder-path visibility, and Always on Top
 
 Malformed JSON is handled safely: the app starts with defaults and leaves the
 malformed file untouched so it can be inspected or recovered.
