@@ -242,6 +242,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
 
     def open_settings(self) -> None:
         if self._settings_window is not None and self._settings_window.winfo_exists():
+            self._center_settings_window()
             self._restore_settings_window()
             return
 
@@ -322,6 +323,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.remove_tab_button.grid(row=2, column=2, padx=(4, 18), pady=(0, 16))
         self._refresh_tab_selector()
 
+        self._center_settings_window()
         window.after(50, window.focus_force)
 
     def _close_settings(self) -> None:
@@ -337,6 +339,18 @@ class FolderShortcutsApp(_DndEnabledCTk):
         window.lift()
         window.attributes("-topmost", self.always_on_top.get())
         window.focus_force()
+
+    def _center_settings_window(self) -> None:
+        window = self._settings_window
+        if window is None or not window.winfo_exists():
+            return
+        self.update_idletasks()
+        window.update_idletasks()
+        width, height = 380, 430
+        # winfo_x/y use the outer window position, avoiding title-bar offsets.
+        x = self.winfo_x() + (self.winfo_width() - width) // 2
+        y = self.winfo_y() + (self.winfo_height() - height) // 2
+        window.geometry(f"{width}x{height}+{x}+{y}")
 
     def _refresh_tab_selector(self) -> None:
         values = self.custom_tabs or ["No custom tabs"]
