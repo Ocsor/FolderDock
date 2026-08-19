@@ -361,10 +361,16 @@ class FolderShortcutsApp(_DndEnabledCTk):
         index: int,
         shortcut: FolderShortcut,
     ) -> None:
-        row = ctk.CTkFrame(frame, corner_radius=8, border_width=0)
-        row.grid(row=view_position, column=0, sticky="ew", padx=2, pady=(2, 7))
-        row.grid_columnconfigure(1, weight=1)
         show_path = self.show_folder_paths.get()
+        row = ctk.CTkFrame(frame, corner_radius=8, border_width=0)
+        row.grid(
+            row=view_position,
+            column=0,
+            sticky="ew",
+            padx=2,
+            pady=(2, 7) if show_path else (1, 3),
+        )
+        row.grid_columnconfigure(1, weight=1)
         row_span = 2 if show_path else 1
 
         handle = ctk.CTkLabel(
@@ -388,7 +394,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             column=1,
             sticky="ew",
             padx=(8, 6),
-            pady=(11, 11) if not show_path else (10, 0),
+            pady=(6, 6) if not show_path else (10, 0),
         )
 
         path_label: ctk.CTkLabel | None = None
@@ -412,6 +418,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             row,
             text="•••",
             width=42,
+            height=26 if not show_path else 28,
             fg_color=("gray70", "gray30"),
             hover_color=("gray60", "gray40"),
         )
