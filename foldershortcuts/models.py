@@ -12,7 +12,7 @@ class FolderShortcut:
     name: str
     path: str
     archived: bool = False
-    client: bool = False
+    tab: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -29,10 +29,14 @@ class FolderShortcut:
         archived = value.get("archived", False)
         if not isinstance(archived, bool):
             archived = False
-        client = value.get("client", False)
-        if not isinstance(client, bool):
-            client = False
-        return cls(name=name, path=path, archived=archived, client=client) if name and path else None
+        tab = value.get("tab", "")
+        if not isinstance(tab, str):
+            tab = ""
+        tab = tab.strip()
+        # Migrate entries written by the earlier fixed Clients-tab version.
+        if not tab and value.get("client") is True:
+            tab = "Clients"
+        return cls(name=name, path=path, archived=archived, tab=tab) if name and path else None
 
 
 def default_shortcut_name(path: str) -> str:

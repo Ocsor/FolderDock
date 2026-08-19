@@ -56,7 +56,7 @@ def _short_path(path: str, limit: int = 76) -> str:
 def _shortcut_section(shortcut: FolderShortcut) -> str:
     if shortcut.archived:
         return "Archive"
-    return "Clients" if shortcut.client else "Shortcuts"
+    return shortcut.tab or "Shortcuts"
 
 
 def _resource_path(relative_path: str) -> Path:
@@ -106,11 +106,10 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.storage = storage or Storage()
         self.shortcuts = self.storage.load_shortcuts()
         self.settings = self.storage.load_settings()
+        self.custom_tabs = self._load_custom_tabs()
         self.statuses: dict[str, bool | None] = {}
         self._rows: dict[str, list[ctk.CTkFrame]] = {
-            "Shortcuts": [],
-            "Clients": [],
-            "Archive": [],
+            name: [] for name in self._section_names()
         }
         self._tooltips: list[Tooltip] = []
         self._drag_state: dict[str, int | str] | None = None
@@ -175,11 +174,9 @@ class FolderShortcutsApp(_DndEnabledCTk):
         ).grid(row=0, column=1, sticky="e")
         self.tabs = ctk.CTkTabview(self, corner_radius=10)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 10))
-        self.tabs.add("Shortcuts")
-        self.tabs.add("Clients")
-        self.tabs.add("Archive")
         self.list_frames: dict[str, ctk.CTkScrollableFrame] = {}
-        for tab_name in ("Shortcuts", "Clients", "Archive"):
+        for tab_name in self._section_names():
+            self.tabs.add(tab_name)
             tab = self.tabs.tab(tab_name)
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
@@ -220,6 +217,29 @@ class FolderShortcutsApp(_DndEnabledCTk):
         except tk.TclError:
             self._window_icon = None
 
+    def _load_custom_tabs(self) -> list[str]:
+        raw_tabs = self.settings.get("custom_tabs", ["Clients"])
+        tabs: list[str] = []
+        if isinstance(raw_tabs, list):
+            for value in raw_tabs:
+                if isinstance(value, str):
+                    name = value.strip()
+                    if self._valid_new_tab_name(name, tabs):
+                        tabs.append(name)
+        for shortcut in self.shortcuts:
+            if shortcut.tab and self._valid_new_tab_name(shortcut.tab, tabs):
+                tabs.append(shortcut.tab)
+        return tabs
+
+    @staticmethod
+    def _valid_new_tab_name(name: str, existing: list[str]) -> bool:
+        reserved = {"shortcuts", "archive"}
+        used = {value.casefold() for value in existing}
+        return bool(name) and name.casefold() not in reserved | used
+
+    def _section_names(self) -> list[str]:
+        return ["Shortcuts", *self.custom_tabs, "Archive"]
+
     def open_settings(self) -> None:
         if self._settings_window is not None and self._settings_window.winfo_exists():
             self._settings_window.focus_force()
@@ -228,7 +248,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         window = ctk.CTkToplevel(self)
         self._settings_window = window
         window.title("FolderDock Settings")
-        window.geometry("340x250")
+        window.geometry("380x430")
         window.resizable(False, False)
         window.transient(self)
         window.attributes("-topmost", self.always_on_top.get())
@@ -265,12 +285,152 @@ class FolderShortcutsApp(_DndEnabledCTk):
             command=self._toggle_folder_paths,
         ).grid(row=2, column=0, sticky="w", padx=18, pady=(10, 18))
 
+        tabs_frame = ctk.CTkFrame(window, corner_radius=10)
+        tabs_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(16, 0))
+        tabs_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            tabs_frame,
+            text="Custom tabs",
+            anchor="w",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=18, pady=(16, 10))
+
+        self.selected_tab = tk.StringVar()
+        self.tab_selector = ctk.CTkOptionMenu(
+            tabs_frame,
+            variable=self.selected_tab,
+            dynamic_resizing=False,
+        )
+        self.tab_selector.grid(
+            row=1, column=0, columnspan=3, sticky="ew", padx=18, pady=(0, 12)
+        )
+        ctk.CTkButton(
+            tabs_frame, text="Add", width=92, command=self.add_custom_tab
+        ).grid(row=2, column=0, padx=(18, 4), pady=(0, 16))
+        self.rename_tab_button = ctk.CTkButton(
+            tabs_frame, text="Rename", width=92, command=self.rename_custom_tab
+        )
+        self.rename_tab_button.grid(row=2, column=1, padx=4, pady=(0, 16))
+        self.remove_tab_button = ctk.CTkButton(
+            tabs_frame,
+            text="Remove",
+            width=92,
+            fg_color=("gray70", "gray30"),
+            hover_color=("gray60", "gray40"),
+            command=self.remove_custom_tab,
+        )
+        self.remove_tab_button.grid(row=2, column=2, padx=(4, 18), pady=(0, 16))
+        self._refresh_tab_selector()
+
         window.after(50, window.focus_force)
 
     def _close_settings(self) -> None:
         if self._settings_window is not None:
             self._settings_window.destroy()
             self._settings_window = None
+
+    def _refresh_tab_selector(self) -> None:
+        values = self.custom_tabs or ["No custom tabs"]
+        self.tab_selector.configure(
+            values=values,
+            state="normal" if self.custom_tabs else "disabled",
+        )
+        self.selected_tab.set(self.custom_tabs[0] if self.custom_tabs else values[0])
+        state = "normal" if self.custom_tabs else "disabled"
+        self.rename_tab_button.configure(state=state)
+        self.remove_tab_button.configure(state=state)
+
+    def add_custom_tab(self) -> None:
+        name = ctk.CTkInputDialog(
+            title="Add tab", text="Name for the new tab:"
+        ).get_input()
+        if name is None:
+            return
+        name = name.strip()
+        if len(name) > 24 or not self._valid_new_tab_name(name, self.custom_tabs):
+            messagebox.showwarning(
+                "Invalid tab name",
+                "Use a unique name of 1–24 characters. Shortcuts and Archive are reserved.",
+                parent=self._settings_window,
+            )
+            return
+
+        self.custom_tabs.append(name)
+        self.tabs.insert(len(self.custom_tabs), name)
+        tab = self.tabs.tab(name)
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+        frame = ctk.CTkScrollableFrame(tab, corner_radius=8)
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.grid_columnconfigure(0, weight=1)
+        self.list_frames[name] = frame
+        self._rows[name] = []
+        self.tabs.set(name)
+        self._render_shortcuts()
+        self._save_settings()
+        self._refresh_tab_selector()
+        self.selected_tab.set(name)
+
+    def rename_custom_tab(self) -> None:
+        old_name = self.selected_tab.get()
+        if old_name not in self.custom_tabs:
+            return
+        name = ctk.CTkInputDialog(
+            title="Rename tab", text=f"New name for {old_name}:"
+        ).get_input()
+        if name is None:
+            return
+        name = name.strip()
+        other_tabs = [value for value in self.custom_tabs if value != old_name]
+        if len(name) > 24 or not self._valid_new_tab_name(name, other_tabs):
+            messagebox.showwarning(
+                "Invalid tab name",
+                "Use a unique name of 1–24 characters. Shortcuts and Archive are reserved.",
+                parent=self._settings_window,
+            )
+            return
+
+        position = self.custom_tabs.index(old_name)
+        self.custom_tabs[position] = name
+        for shortcut in self.shortcuts:
+            if shortcut.tab == old_name:
+                shortcut.tab = name
+        self.tabs.rename(old_name, name)
+        self.list_frames[name] = self.list_frames.pop(old_name)
+        self._rows[name] = self._rows.pop(old_name)
+        self.tabs.set(name)
+        self._save_and_render()
+        self._save_settings()
+        self._refresh_tab_selector()
+        self.selected_tab.set(name)
+
+    def remove_custom_tab(self) -> None:
+        name = self.selected_tab.get()
+        if name not in self.custom_tabs:
+            return
+        affected = sum(shortcut.tab == name for shortcut in self.shortcuts)
+        detail = (
+            f" {affected} saved folder{'s' if affected != 1 else ''} will move to Shortcuts."
+            if affected
+            else ""
+        )
+        if not messagebox.askyesno(
+            "Remove tab",
+            f'Remove the tab "{name}"?{detail}\n\nNo folders will be deleted.',
+            parent=self._settings_window,
+        ):
+            return
+        for shortcut in self.shortcuts:
+            if shortcut.tab == name:
+                shortcut.tab = ""
+        self.tabs.set("Shortcuts")
+        self.tabs.delete(name)
+        self.custom_tabs.remove(name)
+        self.list_frames.pop(name, None)
+        self._rows.pop(name, None)
+        self._save_and_render()
+        self._save_settings()
+        self._refresh_tab_selector()
 
     def _enable_drag_and_drop(self) -> None:
         if TkinterDnD is None or DND_FILES is None:
@@ -302,11 +462,12 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if not folders:
             messagebox.showwarning("Folder Shortcuts", "Drop one or more folders, not files.", parent=self)
             return
-        add_to_clients = self.tabs.get() == "Clients"
+        selected_tab = self.tabs.get()
+        destination = selected_tab if selected_tab in self.custom_tabs else ""
         for path in folders:
-            self._add_shortcut(path, client=add_to_clients)
+            self._add_shortcut(path, tab=destination)
 
-    def _add_shortcut(self, path: str, client: bool = False) -> None:
+    def _add_shortcut(self, path: str, tab: str = "") -> None:
         cleaned = os.path.normpath(path.strip())
         if not cleaned or cleaned == ".":
             messagebox.showwarning("Folder Shortcuts", "Enter a valid folder path.", parent=self)
@@ -316,7 +477,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
             return
 
         fallback = default_shortcut_name(cleaned)
-        self.shortcuts.append(FolderShortcut(name=fallback, path=cleaned, client=client))
+        self.shortcuts.append(FolderShortcut(name=fallback, path=cleaned, tab=tab))
         self._save_and_render()
         self._check_availability(len(self.shortcuts) - 1)
 
@@ -324,10 +485,10 @@ class FolderShortcutsApp(_DndEnabledCTk):
         for frame in self.list_frames.values():
             for child in frame.winfo_children():
                 child.destroy()
-        self._rows = {"Shortcuts": [], "Clients": [], "Archive": []}
+        self._rows = {name: [] for name in self._section_names()}
         self._tooltips.clear()
 
-        for section_name in ("Shortcuts", "Clients", "Archive"):
+        for section_name in self._section_names():
             frame = self.list_frames[section_name]
             section = [
                 (index, shortcut)
@@ -335,14 +496,15 @@ class FolderShortcutsApp(_DndEnabledCTk):
                 if _shortcut_section(shortcut) == section_name
             ]
             if not section:
-                empty_messages = {
-                    "Shortcuts": "No shortcuts yet\nDrop a folder here to get started.",
-                    "Clients": "No clients yet\nDrop a folder here or move one from Shortcuts.",
-                    "Archive": "Nothing archived\nArchived shortcuts remain saved here.",
-                }
+                if section_name == "Shortcuts":
+                    empty_message = "No shortcuts yet\nDrop a folder here to get started."
+                elif section_name == "Archive":
+                    empty_message = "Nothing archived\nArchived shortcuts remain saved here."
+                else:
+                    empty_message = f"Nothing in {section_name} yet\nDrop a folder here or move one from another tab."
                 ctk.CTkLabel(
                     frame,
-                    text=empty_messages[section_name],
+                    text=empty_message,
                     text_color=("gray40", "gray65"),
                     font=ctk.CTkFont(size=14),
                 ).grid(row=0, column=0, pady=70)
@@ -562,15 +724,22 @@ class FolderShortcutsApp(_DndEnabledCTk):
 
     def _add_section_actions(self, menu: tk.Menu, index: int, section: str) -> None:
         if section == "Archive":
+            destination = self.shortcuts[index].tab or "Shortcuts"
             menu.add_command(
-                label="Restore to Clients" if self.shortcuts[index].client else "Restore to Shortcuts",
+                label=f"Restore to {destination}",
                 command=lambda: self.set_archived(index, False),
             )
             return
-        menu.add_command(
-            label="Move to Clients" if section == "Shortcuts" else "Move to Shortcuts",
-            command=lambda: self.set_client(index, section == "Shortcuts"),
-        )
+        destinations = ["Shortcuts", *self.custom_tabs]
+        destinations = [name for name in destinations if name != section]
+        if destinations:
+            move_menu = tk.Menu(menu, tearoff=False)
+            for destination in destinations:
+                move_menu.add_command(
+                    label=destination,
+                    command=lambda name=destination: self.move_to_tab(index, name),
+                )
+            menu.add_cascade(label="Move to", menu=move_menu)
         menu.add_command(
             label="Archive Shortcut",
             command=lambda: self.set_archived(index, True),
@@ -620,10 +789,12 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.shortcuts[index].archived = archived
         self._save_and_render()
 
-    def set_client(self, index: int, client: bool) -> None:
+    def move_to_tab(self, index: int, tab_name: str) -> None:
         if not 0 <= index < len(self.shortcuts):
             return
-        self.shortcuts[index].client = client
+        if tab_name not in ["Shortcuts", *self.custom_tabs]:
+            return
+        self.shortcuts[index].tab = "" if tab_name == "Shortcuts" else tab_name
         self.shortcuts[index].archived = False
         self._save_and_render()
 
@@ -735,6 +906,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.settings["always_on_top"] = self.always_on_top.get()
         self.settings["appearance_mode"] = "Dark" if self.dark_mode.get() else "Light"
         self.settings["show_folder_paths"] = self.show_folder_paths.get()
+        self.settings["custom_tabs"] = self.custom_tabs
         try:
             self.storage.save_settings(self.settings)
         except OSError:

@@ -20,8 +20,15 @@ class FolderShortcutTests(unittest.TestCase):
         self.assertEqual(FolderShortcut.from_dict(shortcut.to_dict()), shortcut)
 
     def test_client_state_round_trips(self) -> None:
-        shortcut = FolderShortcut("Client", r"C:\Clients\Example", client=True)
+        shortcut = FolderShortcut("Client", r"C:\Clients\Example", tab="Clients")
         self.assertEqual(FolderShortcut.from_dict(shortcut.to_dict()), shortcut)
+
+    def test_legacy_client_flag_migrates_to_named_tab(self) -> None:
+        shortcut = FolderShortcut.from_dict(
+            {"name": "Client", "path": r"C:\Clients\Example", "client": True}
+        )
+        self.assertIsNotNone(shortcut)
+        self.assertEqual(shortcut.tab, "Clients")
 
 
 if __name__ == "__main__":

@@ -7,8 +7,9 @@ changing the folders themselves.
 
 ## Features
 
-- Drag folders from File Explorer onto the Shortcuts or Clients tab
-- Organize saved folders across Shortcuts, Clients, and Archive
+- Drag folders from File Explorer onto Shortcuts or any custom tab
+- Add, rename, and remove custom tabs from Settings; Clients is included initially
+- Move saved folders between tabs without changing the folders themselves
 - Open from the compact action menu or by double-clicking a shortcut row
 - Right-click to open, copy the full path, rename, reorder, or remove a shortcut
 - Compact rows with optional folder paths controlled from the Settings menu
@@ -17,7 +18,8 @@ changing the folders themselves.
   Archive tab whenever they are needed again
 - Non-blocking availability checks at startup and whenever a folder is opened
 - JSON persistence in `%APPDATA%\FolderShortcuts`
-- Top-right Settings menu for folder-path visibility, Dark Mode, and Always on Top
+- Top-right Settings menu for custom tabs, folder-path visibility, Dark Mode, and
+  Always on Top
 - Remembers window size, position, appearance, and display preferences
 
 Removing an item removes only its entry from the app. FolderDock never
@@ -48,7 +50,7 @@ pip install customtkinter
 The app creates these files automatically:
 
 - `%APPDATA%\FolderShortcuts\shortcuts.json` — friendly names, paths, order, and
-  Clients membership, and archive state
+  custom-tab membership, and archive state
 - `%APPDATA%\FolderShortcuts\settings.json` — window geometry, appearance,
   folder-path visibility, and Always on Top
 
