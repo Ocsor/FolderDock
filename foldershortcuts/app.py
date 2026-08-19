@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tkinter as tk
@@ -12,6 +13,11 @@ from tkinter import filedialog, messagebox
 from typing import Callable
 
 import customtkinter as ctk
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 from .models import FolderShortcut, default_shortcut_name
 from .storage import Storage
@@ -45,6 +51,12 @@ def _short_path(path: str, limit: int = 76) -> str:
         return path
     side = (limit - 3) // 2
     return f"{path[:side]}...{path[-side:]}"
+
+
+def _resource_path(relative_path: str) -> Path:
+    """Resolve bundled PyInstaller assets as well as development files."""
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return bundle_root / relative_path
 
 
 class Tooltip:
@@ -97,8 +109,8 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self._closing = False
         self._save_after_id: str | None = None
 
-        self.title("Folder Shortcuts")
-        self.minsize(600, 360)
+        self.title("FolderDock")
+        self.minsize(520, 360)
         geometry = self.settings.get("geometry", "680x520")
         if isinstance(geometry, str) and re.fullmatch(r"\d+x\d+(?:[+-]\d+){0,2}", geometry):
             self.geometry(geometry)
@@ -106,9 +118,14 @@ class FolderShortcutsApp(_DndEnabledCTk):
             self.geometry("680x520")
 
         self.always_on_top = tk.BooleanVar(value=bool(self.settings.get("always_on_top", False)))
+        saved_appearance = self.settings.get("appearance_mode", ctk.get_appearance_mode())
+        self.dark_mode = tk.BooleanVar(value=saved_appearance == "Dark")
+        ctk.set_appearance_mode("Dark" if self.dark_mode.get() else "Light")
         self.attributes("-topmost", self.always_on_top.get())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Configure>", self._schedule_settings_save)
+        self.logo_image = self._load_logo()
+        self._set_window_icon()
 
         self._build_ui()
         self._enable_drag_and_drop()
@@ -124,9 +141,17 @@ class FolderShortcutsApp(_DndEnabledCTk):
         header.grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 10))
         header.grid_columnconfigure(0, weight=1)
 
+        title_frame = ctk.CTkFrame(header, fg_color="transparent")
+        title_frame.grid(row=0, column=0, sticky="w")
+        title_column = 0
+        if self.logo_image is not None:
+            ctk.CTkLabel(title_frame, text="", image=self.logo_image, width=42).grid(
+                row=0, column=0, padx=(0, 9)
+            )
+            title_column = 1
         ctk.CTkLabel(
-            header, text="Folder Shortcuts", font=ctk.CTkFont(size=22, weight="bold")
-        ).grid(row=0, column=0, sticky="w")
+            title_frame, text="FolderDock", font=ctk.CTkFont(size=22, weight="bold")
+        ).grid(row=0, column=title_column, sticky="w")
         ctk.CTkButton(header, text="Refresh", width=76, command=self.refresh_availability).grid(
             row=0, column=1, padx=(8, 0)
         )
@@ -163,10 +188,37 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.hint_label.grid(row=0, column=0, sticky="w")
         ctk.CTkSwitch(
             footer,
+            text="Dark mode",
+            variable=self.dark_mode,
+            command=self._toggle_dark_mode,
+        ).grid(row=0, column=1, sticky="e", padx=(8, 14))
+        ctk.CTkSwitch(
+            footer,
             text="Always on top",
             variable=self.always_on_top,
             command=self._toggle_topmost,
-        ).grid(row=0, column=1, sticky="e")
+        ).grid(row=0, column=2, sticky="e")
+
+    def _load_logo(self) -> ctk.CTkImage | None:
+        logo_path = _resource_path("Logo/FolderDock.png")
+        if Image is None or not logo_path.is_file():
+            return None
+        try:
+            with Image.open(logo_path) as image:
+                logo = image.convert("RGBA").copy()
+            return ctk.CTkImage(light_image=logo, dark_image=logo, size=(42, 42))
+        except OSError:
+            return None
+
+    def _set_window_icon(self) -> None:
+        logo_path = _resource_path("Logo/FolderDock.png")
+        if not logo_path.is_file():
+            return
+        try:
+            self._window_icon = tk.PhotoImage(file=str(logo_path))
+            self.iconphoto(True, self._window_icon)
+        except tk.TclError:
+            self._window_icon = None
 
     def _enable_drag_and_drop(self) -> None:
         if TkinterDnD is None or DND_FILES is None:
@@ -313,25 +365,19 @@ class FolderShortcutsApp(_DndEnabledCTk):
         status_label = ctk.CTkLabel(row, text=status_text, text_color=status_color, width=88)
         status_label.grid(row=0, column=2, rowspan=2, padx=3)
 
-        ctk.CTkButton(
-            row, text="Open", width=56, command=lambda i=index: self.open_shortcut(i)
-        ).grid(row=0, column=3, rowspan=2, padx=3)
-        ctk.CTkButton(
+        actions_button = ctk.CTkButton(
             row,
-            text="Restore" if archived else "Archive",
-            width=62,
-            fg_color=("#47764f", "#35633e") if archived else ("#65707d", "#47515d"),
-            hover_color=("#3c6743", "#40754b") if archived else ("#56616e", "#566270"),
-            command=lambda i=index, value=not archived: self.set_archived(i, value),
-        ).grid(row=0, column=4, rowspan=2, padx=3)
-        ctk.CTkButton(
-            row,
-            text="Remove",
-            width=62,
+            text="•••",
+            width=42,
             fg_color=("gray70", "gray30"),
             hover_color=("gray60", "gray40"),
-            command=lambda i=index: self.remove_shortcut(i),
-        ).grid(row=0, column=5, rowspan=2, padx=(3, 10))
+        )
+        actions_button.configure(
+            command=lambda button=actions_button, i=index, a=archived: self._show_action_menu(
+                button, i, a
+            )
+        )
+        actions_button.grid(row=0, column=3, rowspan=2, padx=(5, 10))
 
         for widget in (row, handle, name, path_label, status_label):
             widget.bind("<Double-Button-1>", lambda _event, i=index: self.open_shortcut(i))
@@ -444,6 +490,25 @@ class FolderShortcutsApp(_DndEnabledCTk):
         menu.add_command(label="Remove Shortcut", command=lambda: self.remove_shortcut(index))
         try:
             menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _show_action_menu(
+        self, button: ctk.CTkButton, index: int, archived: bool
+    ) -> None:
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Open Folder", command=lambda: self.open_shortcut(index))
+        menu.add_command(
+            label="Restore Shortcut" if archived else "Archive Shortcut",
+            command=lambda: self.set_archived(index, not archived),
+        )
+        menu.add_separator()
+        menu.add_command(label="Remove Shortcut", command=lambda: self.remove_shortcut(index))
+        try:
+            menu.tk_popup(
+                button.winfo_rootx() + button.winfo_width(),
+                button.winfo_rooty() + button.winfo_height(),
+            )
         finally:
             menu.grab_release()
 
@@ -574,6 +639,10 @@ class FolderShortcutsApp(_DndEnabledCTk):
         self.attributes("-topmost", self.always_on_top.get())
         self._save_settings()
 
+    def _toggle_dark_mode(self) -> None:
+        ctk.set_appearance_mode("Dark" if self.dark_mode.get() else "Light")
+        self._save_settings()
+
     def _schedule_settings_save(self, event: tk.Event) -> None:
         if event.widget is not self or self._closing:
             return
@@ -586,6 +655,7 @@ class FolderShortcutsApp(_DndEnabledCTk):
         if self.state() == "normal":
             self.settings["geometry"] = self.geometry()
         self.settings["always_on_top"] = self.always_on_top.get()
+        self.settings["appearance_mode"] = "Dark" if self.dark_mode.get() else "Light"
         try:
             self.storage.save_settings(self.settings)
         except OSError:

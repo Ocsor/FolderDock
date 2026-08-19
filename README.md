@@ -18,7 +18,7 @@ changing the folders themselves.
 - Non-blocking availability checks at startup, on open, and on manual refresh
 - JSON persistence in `%APPDATA%\FolderShortcuts`
 - Remembers window size, position, and the Always on Top setting
-- Follows the Windows light/dark appearance setting
+- Light and dark modes with a remembered Dark Mode toggle
 
 Removing an item removes only its entry from the app. Folder Shortcuts never
 deletes or modifies the target folder.
@@ -49,7 +49,8 @@ The app creates these files automatically:
 
 - `%APPDATA%\FolderShortcuts\shortcuts.json` — friendly names, paths, order, and
   archive state
-- `%APPDATA%\FolderShortcuts\settings.json` — window geometry and Always on Top
+- `%APPDATA%\FolderShortcuts\settings.json` — window geometry, appearance, and
+  Always on Top
 
 Malformed JSON is handled safely: the app starts with defaults and leaves the
 malformed file untouched so it can be inspected or recovered.
@@ -61,10 +62,10 @@ project root:
 
 ```powershell
 pip install pyinstaller
-pyinstaller --noconfirm --clean --noconsole --onefile --name FolderShortcuts --collect-all customtkinter --collect-all tkinterdnd2 main.py
+pyinstaller --noconfirm --clean --noconsole --onefile --name FolderDock --collect-all customtkinter --collect-all tkinterdnd2 --add-data "Logo/FolderDock.png;Logo" main.py
 ```
 
-The executable is created at `dist\FolderShortcuts.exe`. It uses the same
+The executable is created at `dist\FolderDock.exe`. It uses the same
 `%APPDATA%\FolderShortcuts` data directory as the Python version. If
 drag-and-drop was intentionally omitted, leave out `--collect-all tkinterdnd2`.
 
